@@ -2,6 +2,7 @@ package mboxreader
 
 import (
 	"bytes"
+	"errors"
 	"io/ioutil"
 	"testing"
 
@@ -24,10 +25,7 @@ and here
 		[]byte("\n")}
 	mbox := bytes.NewReader([]byte(bytes.Join(raw, []byte(""))))
 
-	m, err := NewMBOXReader(mbox)
-	if err != nil {
-		panic(err)
-	}
+	m := NewMBOXReader(mbox)
 
 	iterations := 0
 	for m.Next() {
@@ -84,13 +82,11 @@ body body body
 
 	mbox := bytes.NewReader([]byte(bytes.Join(msgs, []byte(""))))
 
-	m, err := NewMBOXReader(mbox)
-	if err != nil {
-		panic(err)
-	}
+	m := NewMBOXReader(mbox)
 
 	offset := 1
 	count := 0
+	iteration := 0
 	for m.Next() {
 		msg, err := ioutil.ReadAll(m)
 		if err != nil {
@@ -101,7 +97,9 @@ body body body
 
 		offset += 3
 		count++
+		iteration++
 	}
+	assert.Equal(t, 3, iteration)
 }
 
 func TestEscapedFrom(t *testing.T) {
@@ -134,11 +132,7 @@ body body body
 `)
 
 	mbox := bytes.NewReader(raw)
-
-	m, err := NewMBOXReader(mbox)
-	if err != nil {
-		panic(err)
-	}
+	m := NewMBOXReader(mbox)
 
 	for m.Next() {
 		msg, err := ioutil.ReadAll(m)
@@ -148,4 +142,65 @@ body body body
 
 		assert.Equal(t, want, msg)
 	}
+}
+
+type errReader []byte
+
+func (errReader) Read(p []byte) (int, error) {
+	return 0, errors.New("test read error")
+}
+
+type errShortReader []byte
+
+func (e errShortReader) Read(p []byte) (int, error) {
+	n := copy(p, e)
+	return n, errors.New("short read")
+}
+
+func TestReadErrors(t *testing.T) {
+	m := NewMBOXReader(bytes.NewReader(errReader(nil)))
+	_, err := ioutil.ReadAll(m)
+	assert.Error(t, err)
+}
+
+func TestBadMBOX(t *testing.T) {
+	m := NewMBOXReader(bytes.NewReader([]byte("not the proper header")))
+	_, err := ioutil.ReadAll(m)
+	assert.EqualError(t, err, "MBOX header not found.")
+}
+
+func TestBadMBOX2(t *testing.T) {
+	raw := []byte(
+		`From 3671168074256204903@xxx Fri Jul 05 04:21:10 +0000 2020
+From: "Some One" <person@example.net>
+
+foobar
+From 9671168074256204903@xxx Fri Jul 05 04:21:10 +0000 2020`)
+
+	mbox := bytes.NewReader(raw)
+	m := NewMBOXReader(mbox)
+	_, err := ioutil.ReadAll(m)
+	assert.EqualError(t, err, "MBOX footer not found.")
+}
+
+func TestBadMBOX3(t *testing.T) {
+	raw := []byte(
+		`From 3671168074256204903@xxx Fri Jul 05 04:21:10 +0000 2020
+From: "Some One" <person@example.net>
+
+foobar
+
+From 9671168074256204903@xxx Fri Jul 05 04:21:10 +0000 2020`)
+
+	want := []byte(`From: "Some One" <person@example.net>
+
+foobar
+`)
+
+	mbox := bytes.NewReader(raw)
+	m := NewMBOXReader(mbox)
+	msg, err := ioutil.ReadAll(m)
+	assert.NoError(t, err)
+	assert.Equal(t, want, msg)
+	assert.False(t, m.Next())
 }
