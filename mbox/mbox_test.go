@@ -1,4 +1,18 @@
-package mboxreader
+// Copyright (c) 2021 Jeff Macdonald <macfisherman@gmail.com>
+//
+// Permission to use, copy, modify, and distribute this software for any
+// purpose with or without fee is hereby granted, provided that the above
+// copyright notice and this permission notice appear in all copies.
+//
+// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+// ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+// ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+// OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+package mbox_test
 
 import (
 	"bytes"
@@ -6,6 +20,7 @@ import (
 	"io/ioutil"
 	"testing"
 
+	"github.com/macfisherman/mboxreader/mbox"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -21,11 +36,15 @@ Date: Thu, 02 Jul 2020 22:21:08 -0600
 Body of message here
 and here
 and here
+
+
+
 `),
 		[]byte("\n")}
-	mbox := bytes.NewReader([]byte(bytes.Join(raw, []byte(""))))
 
-	m := NewMBOXReader(mbox)
+	box := bytes.NewReader([]byte(bytes.Join(raw, []byte(""))))
+
+	m := mbox.New(box)
 
 	iterations := 0
 	for m.Next() {
@@ -34,7 +53,9 @@ and here
 			panic(err)
 		}
 
-		assert.Equal(t, raw[1], msg)
+		// last one will have entire content till eof
+		expected := append(raw[1], byte('\n'))
+		assert.Equal(t, expected, msg)
 		iterations++
 	}
 
@@ -57,7 +78,7 @@ and here
 		[]byte("\n"),
 		[]byte("From 2671168074256204903@xxx Fri Jul 04 04:21:10 +0000 2020\n"),
 		[]byte(
-			`From: "Some One" <person@example.net>
+			`From: "Some Two" <person@example.net>
 To: <one@example.com>
 Subject: Another test
 Date: Thu, 03 Jul 2020 22:21:08 -0600
@@ -69,7 +90,7 @@ another line
 		[]byte("\n"),
 		[]byte("From 3671168074256204903@xxx Fri Jul 05 04:21:10 +0000 2020\n"),
 		[]byte(
-			`From: "Some One" <person@example.net>
+			`From: "Some Three" <person@example.net>
 To: <one@example.com>
 Subject: Again
 Date: Thu, 04 Jul 2020 22:21:08 -0600
@@ -80,26 +101,27 @@ body body body
 `),
 		[]byte("\n")}
 
-	mbox := bytes.NewReader([]byte(bytes.Join(msgs, []byte(""))))
+	box := bytes.NewReader([]byte(bytes.Join(msgs, []byte(""))))
 
-	m := NewMBOXReader(mbox)
+	m := mbox.New(box)
 
-	offset := 1
-	count := 0
-	iteration := 0
+	var got [][]byte
+
 	for m.Next() {
 		msg, err := ioutil.ReadAll(m)
 		if err != nil {
 			panic(err)
 		}
 
-		assert.Equalf(t, msgs[offset], msg, "msg %d", count)
-
-		offset += 3
-		count++
-		iteration++
+		got = append(got, msg)
 	}
-	assert.Equal(t, 3, iteration)
+
+	assert.Equal(t, msgs[1], got[0])
+	assert.Equal(t, msgs[4], got[1])
+
+	// last one will have entire content till eof
+	expected := append(msgs[7], byte('\n'))
+	assert.Equal(t, expected, got[2])
 }
 
 func TestEscapedFrom(t *testing.T) {
@@ -129,16 +151,19 @@ From someone
 body body body
 >From someone said
 >>From one
+
 `)
 
-	mbox := bytes.NewReader(raw)
-	m := NewMBOXReader(mbox)
+	box := bytes.NewReader(raw)
+	m := mbox.New(box)
 
 	for m.Next() {
 		msg, err := ioutil.ReadAll(m)
 		if err != nil {
 			panic(err)
 		}
+
+		t.Log(msg)
 
 		assert.Equal(t, want, msg)
 	}
@@ -158,13 +183,13 @@ func (e errShortReader) Read(p []byte) (int, error) {
 }
 
 func TestReadErrors(t *testing.T) {
-	m := NewMBOXReader(bytes.NewReader(errReader(nil)))
+	m := mbox.New(bytes.NewReader(errReader(nil)))
 	_, err := ioutil.ReadAll(m)
 	assert.Error(t, err)
 }
 
 func TestBadMBOX(t *testing.T) {
-	m := NewMBOXReader(bytes.NewReader([]byte("not the proper header")))
+	m := mbox.New(bytes.NewReader([]byte("not the proper header")))
 	_, err := ioutil.ReadAll(m)
 	assert.EqualError(t, err, "MBOX header not found.")
 }
@@ -177,8 +202,8 @@ From: "Some One" <person@example.net>
 foobar
 From 9671168074256204903@xxx Fri Jul 05 04:21:10 +0000 2020`)
 
-	mbox := bytes.NewReader(raw)
-	m := NewMBOXReader(mbox)
+	box := bytes.NewReader(raw)
+	m := mbox.New(box)
 	_, err := ioutil.ReadAll(m)
 	assert.EqualError(t, err, "MBOX footer not found.")
 }
@@ -197,8 +222,8 @@ From 9671168074256204903@xxx Fri Jul 05 04:21:10 +0000 2020`)
 foobar
 `)
 
-	mbox := bytes.NewReader(raw)
-	m := NewMBOXReader(mbox)
+	box := bytes.NewReader(raw)
+	m := mbox.New(box)
 	msg, err := ioutil.ReadAll(m)
 	assert.NoError(t, err)
 	assert.Equal(t, want, msg)
